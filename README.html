@@ -297,8 +297,8 @@ constructor(){
       5:{work:false,gym:false,repair:true},
       6:{work:false,gym:true,repair:true}
     },
-    skipped: storage.get('skipped') || {},
-    supplements: storage.get('supplements') || {},
+    skipped: storage.get('skipped') ?? {},
+    supplements: storage.get('supplements') ?? {},
     notifications: storage.get('notifications') || true,
     lastNotification: storage.get('lastNotification') || null
   };
@@ -562,6 +562,123 @@ getSlots(dayIndex){
   s.push({t:'00:00-06:00',a:'Сон',c:'bg-indigo-100',id:'sleep'});
   return s;
 }
+ 
+renderSchedule(){
+  this.slotsElements = {};
+  const dayIndex = this.state.selectedDay;
+  const dayDate = this.getDateKey(dayIndex);
+  const slots = this.getSlots(dayIndex);
+
+  return `
+    <div>
+      <div class="mb-4">
+        <h1 class="header-title">${this.days[dayIndex]}</h1>
+        <p class="text-gray-500">${this.getDateForDay(dayIndex)}</p>
+      </div>
+
+      <div class="space-y-3">
+        ${slots.map((slot,i)=>{
+          const key = `${dayDate}-${slot.id}-${i}`;
+          const isPast = this.isPast(slot, dayIndex);
+          const isCurrent = this.isCurrent(slot, dayIndex);
+          const isSkipped = this.state.skipped[key];
+
+          return `
+            <div class="slot p-4 ${isCurrent?'current-time':''} ${isPast?'past-slot':''} ${isSkipped?'skipped-slot':''}">
+              <div class="flex justify-between">
+                <div>
+                  <div class="text-sm text-gray-500">${slot.t}</div>
+                  <div class="font-semibold">${slot.a}</div>
+
+                  ${slot.supps ? slot.supps.map((s,si)=>{
+                    const sk = `${key}-s${si}`;
+                    return `
+                      <div class="flex items-center gap-2 mt-2">
+                        <button 
+                          class="supp-checkbox ${this.state.supplements[sk]?'checked':''}" 
+                          data-supp="${sk}">
+                          ${this.state.supplements[sk]?'✓':''}
+                        </button>
+                        <span class="text-sm">${s}</span>
+                      </div>
+                    `;
+                  }).join('') : ''}
+                </div>
+
+                ${isPast ? `
+                  <button class="skip-btn ${isSkipped?'skipped':''}" data-skip="${key}">
+                    ${isSkipped?'Пропущено':'Пропустить'}
+                  </button>
+                ` : ''}
+              </div>
+            </div>
+          `;
+        }).join('')}
+      </div>
+    </div>
+  `;
+}
+ 
+render(){
+  const app = document.getElementById('app');
+  app.innerHTML = '';
+
+  // Tabs
+  const tabs = document.createElement('div');
+  tabs.className = 'flex px-4 pt-4';
+  tabs.innerHTML = `
+    <button class="tab-btn ${this.state.currentTab==='schedule'?'active':''}" data-tab="schedule">
+      📅 Расписание
+    </button>
+    <button class="tab-btn ${this.state.currentTab==='analytics'?'active':''}" data-tab="analytics">
+      📊 Аналитика
+    </button>
+  `;
+  app.appendChild(tabs);
+
+  tabs.querySelectorAll('.tab-btn').forEach(btn=>{
+    btn.onclick = () => {
+      haptic.light();
+      this.state.currentTab = btn.dataset.tab;
+      this.render();
+    };
+  });
+
+  // Content
+  const content = document.createElement('div');
+  content.className = 'px-4 mt-4 flex-1 overflow-y-auto';
+
+  content.innerHTML =
+    this.state.currentTab === 'schedule'
+      ? this.renderSchedule()
+      : `${this.renderActivityRings()}${this.renderAnalytics()}`;
+
+  app.appendChild(content);
+
+  this.bindEvents();
+}
+ 
+bindEvents(){
+  document.querySelectorAll('[data-skip]').forEach(btn=>{
+    btn.onclick = ()=>{
+      const k = btn.dataset.skip;
+      this.state.skipped[k] = !this.state.skipped[k];
+      this.save();
+      haptic.light();
+      this.render();
+    };
+  });
+
+  document.querySelectorAll('[data-supp]').forEach(btn=>{
+    btn.onclick = ()=>{
+      const k = btn.dataset.supp;
+      this.state.supplements[k] = !this.state.supplements[k];
+      this.save();
+      haptic.success();
+      this.render();
+    };
+  });
+}
 
 getWeeklyStats(){
   const stats = {
@@ -687,6 +804,18 @@ renderActivityRings(){
     </div>
   `;
 }
+ 
+scrollToCurrent() {
+  setTimeout(() => {
+    const el = document.querySelector('.current-time');
+    if (el) {
+      el.scrollIntoView({
+        behavior: 'smooth',
+        block: 'center'
+      });
+    }
+  }, 300);
+}
 
 renderAnalytics(){
   const stats = this.getWeeklyStats();
@@ -780,4 +909,13 @@ renderAnalytics(){
         ` : ''}
       </div>
     </div>
-  `
+    `;
+} // ← закрывает renderAnalytics()
+
+} // ← закрывает class Planner
+
+// Запуск приложения
+document.addEventListener('DOMContentLoaded', () => {
+  new Planner();
+});
+</script>
