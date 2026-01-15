@@ -91,7 +91,26 @@
     transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     background: linear-gradient(90deg, #34C759 0%, #30D158 100%);
   }
-  
+  /* Анимация процентов */
+  .progress-percent {
+    display: inline-block;
+    transition: transform 0.18s ease, opacity 0.18s ease;
+  }
+
+  .progress-percent.bump {
+    transform: scale(1.15);
+    opacity: 0.75;
+  }
+
+/* Анимация счётчика */
+  .supp-counter {
+    transition: opacity 0.2s ease;
+  }
+
+  .supp-counter.fade {
+    opacity: 0.4;
+  }
+
   .supp-checkbox {
     width: 20px;
     height: 20px;
@@ -598,7 +617,7 @@ renderDailySuppStats(dayIndex){
              style="width:${percent}%"></div>
       </div>
 
-      <div class="mt-2 text-xs text-gray-500">
+      <div class="mt-2 text-xs text-gray-500 supp-counter">
         ${taken} из ${total} приняты
       </div>
     </div>
@@ -628,8 +647,21 @@ updateSuppProgress(){
 
   const percent = Math.round((taken / total) * 100);
 
-  card.querySelector('.progress-percent').textContent = percent + '%';
+  // Проценты (bump-анимация)
+  const percentEl = card.querySelector('.progress-percent');
+  percentEl.classList.remove('bump');
+  void percentEl.offsetWidth; // перезапуск анимации
+  percentEl.textContent = percent + '%';
+  percentEl.classList.add('bump');
+
+  // Прогресс-бар (плавно по CSS)
   card.querySelector('.progress-bar-inner').style.width = percent + '%';
+
+  // Счётчик (fade)
+  const counter = card.querySelector('.supp-counter');
+  counter.classList.add('fade');
+  counter.textContent = `${taken} из ${total} приняты`;
+  setTimeout(() => counter.classList.remove('fade'), 200);
 }
 
 renderSchedule(){
