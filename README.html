@@ -563,6 +563,39 @@ getSlots(dayIndex){
   return s;
 }
  
+renderDailySuppStats(dayIndex){
+  const dayDate=this.getDateKey(dayIndex);
+  const slots=this.getSlots(dayIndex);
+
+  let total=0, taken=0;
+  slots.forEach((slot,i)=>{
+    if(slot.supps){
+      slot.supps.forEach((s,si)=>{
+        total++;
+        const sk=`${dayDate}-${slot.id}-${i}-s${si}`;
+        if(this.state.supplements[sk]) taken++;
+      });
+    }
+  });
+
+  if(total===0) return '';
+
+  const percent=Math.round((taken/total)*100);
+
+  return `
+    <div class="card p-4 mb-4">
+      <div class="flex justify-between items-center mb-2">
+        <span class="text-base font-semibold" style="color:#1C1C1E;">💊 Спортпит</span>
+        <span class="progress-percent text-2xl font-bold" style="color:#34C759;">${percent}%</span>
+      </div>
+      <div class="w-full h-2.5 bg-gray-100 rounded-full overflow-hidden">
+        <div class="progress-bar-inner h-full rounded-full" style="width:${percent}%"></div>
+      </div>
+      <div class="mt-2 text-xs text-gray-500">${taken} из ${total} приняты</div>
+    </div>
+  `;
+}
+ 
 renderSchedule(){
   this.slotsElements = {};
   const dayIndex = this.state.selectedDay;
@@ -574,6 +607,23 @@ renderSchedule(){
       <div class="mb-4">
         <h1 class="header-title">${this.days[dayIndex]}</h1>
         <p class="text-gray-500">${this.getDateForDay(dayIndex)}</p>
+      </div>
+
+      ${this.renderDailySuppStats(dayIndex)}
+
+      <div class="flex gap-2 mb-4">
+        ${['work','gym','repair'].map(type=>{
+          const cfg=this.colors[type];
+          const isActive=this.state.schedule[dayIndex][type];
+          return `
+            <button 
+              class="category-btn flex-1 py-3 font-semibold ${isActive?'':'opacity-50'}" 
+              style="background:${isActive?cfg.bg:'#E5E5EA'}; color:${isActive?'white':'#8E8E93'};"
+              data-category="${type}">
+              ${cfg.icon} ${cfg.text}
+            </button>
+          `;
+        }).join('')}
       </div>
 
       <div class="space-y-3">
@@ -641,12 +691,15 @@ render(){
       haptic.light();
       this.state.currentTab = btn.dataset.tab;
       this.render();
+      if(this.state.currentTab === 'analytics') {
+        window.scrollTo({top: 0, behavior: 'smooth'});
+      }
     };
   });
 
   // Content
   const content = document.createElement('div');
-  content.className = 'px-4 mt-4 flex-1 overflow-y-auto';
+  content.className = 'px-4 mt-4 flex-1 overflow-y-auto pb-4';
 
   content.innerHTML =
     this.state.currentTab === 'schedule'
@@ -655,20 +708,42 @@ render(){
 
   app.appendChild(content);
 
+  // Footer с днями недели (только для расписания)
+  if(this.state.currentTab === 'schedule'){
+    const footer = document.createElement('div');
+    footer.className = 'card fixed bottom-4 left-4 right-4 p-2 flex justify-between gap-1';
+    this.days.forEach((d,i)=>{
+      const btn = document.createElement('button');
+      btn.className = `day-btn flex-1 py-2.5 ${i===this.state.selectedDay?'active':''}`;
+      btn.innerText = d;
+      btn.onclick = ()=>{
+        haptic.light();
+        this.state.selectedDay = i;
+        this.render();
+        this.scrollToCurrent();
+      };
+      footer.appendChild(btn);
+    });
+    app.appendChild(footer);
+  }
+
   this.bindEvents();
+  this.setupSwipe();
 }
  
 bindEvents(){
+  // Skip buttons
   document.querySelectorAll('[data-skip]').forEach(btn=>{
     btn.onclick = ()=>{
       const k = btn.dataset.skip;
       this.state.skipped[k] = !this.state.skipped[k];
       this.save();
-      haptic.light();
+      haptic.heavy();
       this.render();
     };
   });
 
+  // Supplement checkboxes
   document.querySelectorAll('[data-supp]').forEach(btn=>{
     btn.onclick = ()=>{
       const k = btn.dataset.supp;
@@ -678,8 +753,49 @@ bindEvents(){
       this.render();
     };
   });
-}
 
+  // Category buttons
+  document.querySelectorAll('[data-category]').forEach(btn=>{
+    btn.onclick = ()=>{
+      const type = btn.dataset.category;
+      const dayIndex = this.state.selectedDay;
+      this.state.schedule[dayIndex][type] = !this.state.schedule[dayIndex][type];
+      this.save();
+      haptic.medium();
+      this.render();
+      this.scrollToCurrent();
+    };
+  });
+}
+ 
+setupSwipe(){
+  if(this.swipeInit) return;
+  this.swipeInit = true;
+  
+  const app = document.getElementById('app');
+  
+  app.addEventListener('touchstart', e=>{
+    this.touchStartX = e.touches[0].clientX;
+    this.touchStartY = e.touches[0].clientY;
+  }, {passive: true});
+  
+  app.addEventListener('touchend', e=>{
+    const dx = e.changedTouches[0].clientX - this.touchStartX;
+    const dy = e.changedTouches[0].clientY - this.touchStartY;
+    
+    // Свайп работает только на вкладке расписания
+    if(this.state.currentTab === 'schedule' && Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy)){
+      haptic.light();
+      const newDay = this.state.selectedDay + (dx < 0 ? 1 : -1);
+      if(newDay >= 0 && newDay <= 6){
+        this.state.selectedDay = newDay;
+        this.render();
+        this.scrollToCurrent();
+      }
+    }
+  });
+}
+ 
 getWeeklyStats(){
   const stats = {
     work: {total: 0, completed: 0},
@@ -805,16 +921,22 @@ renderActivityRings(){
   `;
 }
  
-scrollToCurrent() {
+scrollToCurrent(){
+  if(this.state.currentTab !== 'schedule') return;
+  
+  const today = new Date();
+  const currentDayIndex = today.getDay() === 0 ? 6 : today.getDay() - 1;
+  
   setTimeout(() => {
-    const el = document.querySelector('.current-time');
-    if (el) {
-      el.scrollIntoView({
-        behavior: 'smooth',
-        block: 'center'
-      });
+    if(this.state.selectedDay === currentDayIndex){
+      const el = document.querySelector('.current-time');
+      if(el){
+        el.scrollIntoView({behavior: 'smooth', block: 'center'});
+      }
+    } else {
+      window.scrollTo({top: 0, behavior: 'smooth'});
     }
-  }, 300);
+  }, 100);
 }
 
 renderAnalytics(){
