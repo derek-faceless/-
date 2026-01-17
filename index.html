@@ -279,6 +279,34 @@
   .chart-bar {
     transition: height 0.5s ease-out;
   }
+  /* Горизонтальный скролл для блоков по дням */
+  .scroll-container {
+    display: flex;
+    gap: 0.75rem; /* как gap-3 */
+    overflow-x: auto;
+    padding: 0.5rem; /* py-2 */
+    scroll-snap-type: x mandatory;
+    -webkit-overflow-scrolling: touch; /* плавный скролл на iOS */
+    margin-left: -0.5rem; /* компенсируем padding */
+    margin-right: -0.5rem;
+  }
+  
+  .scroll-item {
+    min-width: 120px; /* ширина карточки дня */
+    flex-shrink: 0;
+    background: white;
+    border-radius: 0.75rem; /* rounded-xl */
+    padding: 0.75rem; /* p-3 */
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    scroll-snap-align: center;
+  }
+
+  @media (max-width: 360px) {
+    .scroll-item {
+      min-width: 100px;
+      padding: 0.5rem;
+    }
+  }
 </style>
 </head>
 
@@ -1250,26 +1278,24 @@ renderAnalytics() {
     `;
   };
   const renderSuppDaysHorizontal = () => {
-    const todayIndex = new Date().getDay() === 0 ? 6 : new Date().getDay() - 1;
-    const todayName = this.days[todayIndex];
+  const todayIndex = new Date().getDay() === 0 ? 6 : new Date().getDay() - 1;
+  const todayName = this.days[todayIndex];
+
   return `
-    <div class="flex gap-3 overflow-x-auto py-2 -mx-2 px-2">
+    <div class="scroll-container">
       ${this.days.map(d => {
         const items = stats.supplements.days[d];
-
         return `
           <div 
-            class="min-w-[120px] bg-white rounded-xl p-3 shadow-sm
-                   ${d === todayName ? 'ring-2 ring-blue-500' : ''}"
+            class="scroll-item ${d === todayName ? 'ring-2 ring-blue-500' : ''}"
             ${d === todayName ? 'data-today="true"' : ''}>
-
 
             <div class="text-center font-bold text-sm mb-2">${d}</div>
 
             ${
               items.length
                 ? items.map(i => `
-                    <div class="flex items-center gap-1 text-sm mb-1"
+                    <div class="flex items-center gap-1 text-sm mb-1 truncate"
                          style="color:${i.status === 'taken' ? '#34C759' : '#FF3B30'}">
                       <span>${i.status === 'taken' ? '✅' : '❌'}</span>
                       <span class="truncate">${i.supp}</span>
@@ -1283,7 +1309,6 @@ renderAnalytics() {
     </div>
   `;
 };
-
 
   return `
     <div class="space-y-4 px-4 pb-4">
