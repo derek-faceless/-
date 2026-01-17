@@ -87,22 +87,30 @@
     background: #E5E5EA;
   }
   
+  /* Плавная полоса с overshoot */
   .progress-bar-inner {
-    transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: width 0.6s cubic-bezier(0.34, 1.56, 0.64, 1); /* spring-curve */
     background: linear-gradient(90deg, #34C759 0%, #30D158 100%);
   }
-  /* Анимация процентов */
+
+  /* Проценты */
   .progress-percent {
     display: inline-block;
-    transition: transform 0.18s ease, opacity 0.18s ease;
+    font-variant-numeric: tabular-nums;
+    transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.25s ease;
   }
 
   .progress-percent.bump {
-    transform: scale(1.15);
-    opacity: 0.75;
+    transform: scale(1.2);
+    opacity: 0.85;
   }
+  .progress-bar-fill {
+    height: 8px;
+    border-radius: 4px;
+    transition: width 0.5s ease-out;
+}
 
-/* Анимация счётчика */
+  /* Счётчик X из Y */
   .supp-counter {
     transition: opacity 0.2s ease;
   }
@@ -319,7 +327,9 @@ constructor(){
     skipped: storage.get('skipped') ?? {},
     supplements: storage.get('supplements') ?? {},
     notifications: storage.get('notifications') || true,
-    lastNotification: storage.get('lastNotification') || null
+    lastNotification: storage.get('lastNotification') || null,
+    suppNotifications: storage.get('suppNotifications') || {}
+
   };
 
   this.colors={
@@ -338,7 +348,9 @@ constructor(){
   setInterval(()=>{
     this.render();
     this.checkNotifications();
-  }, 60000);
+    this.checkSuppReminders(); // добавляем проверку спортпита
+}, 60000);
+
   
   this.checkNotifications();
 }
@@ -395,6 +407,46 @@ checkNotifications(){
       this.state.lastNotification = notifyKey;
       this.save();
     }
+  });
+}
+
+checkSuppReminders() {
+  const now = new Date();
+  const dayIndex = this.state.selectedDay;
+  const dayDate = this.getDateKey(dayIndex);
+  const slots = this.getSlots(dayIndex);
+
+  slots.forEach((slot, i) => {
+    if (!slot.supps) return;
+
+    slot.supps.forEach((supp, si) => {
+      const key = `${dayDate}-${slot.id}-${i}-s${si}`;
+      const suppState = this.state.supplements[key];
+
+      // Время начала слота
+      const [startTime] = slot.t.split('-');
+      const [h, m] = startTime.split(':').map(Number);
+      const slotMinutes = h * 60 + m;
+      const nowMinutes = now.getHours() * 60 + now.getMinutes();
+
+      // Напоминание за 5 минут
+      if (nowMinutes >= slotMinutes - 5 && nowMinutes < slotMinutes && !suppState) {
+        if (!this.state.suppNotifications[key]?.notified) {
+          this.showNotification(`💊 Приём: ${supp} через 5 минут`);
+          this.state.suppNotifications[key] = { notified: true, taken: false };
+          this.save();
+        }
+      }
+
+      // Пропущено
+      if (nowMinutes > slotMinutes + 15 && !suppState) {
+        if (!this.state.suppNotifications[key]?.taken) {
+          this.showNotification(`⚠️ Пропущено: ${supp}`);
+          this.state.suppNotifications[key] = { notified: true, taken: false };
+          this.save();
+        }
+      }
+    });
   });
 }
 
@@ -647,21 +699,55 @@ updateSuppProgress(){
 
   const percent = Math.round((taken / total) * 100);
 
-  // Проценты (bump-анимация)
+  // ------------------------
+  // 1️⃣ Прогресс-бар с overshoot
+  const bar = card.querySelector('.progress-bar-inner');
+
+  const overshoot = Math.min(percent + 1, 100);
+  bar.style.width = overshoot + '%';
+
+  setTimeout(() => {
+    bar.style.width = percent + '%';
+    
+    // Если 100%, делаем подпрыг
+    if(percent === 100){
+      bar.style.transition = 'transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), width 0.6s';
+      bar.style.transform = 'scaleY(1.3)';
+      bar.style.background = '#28D12E'; // ярко-зелёный
+      setTimeout(()=>{
+        bar.style.transform = 'scaleY(1)';
+        bar.style.background = 'linear-gradient(90deg, #34C759 0%, #30D158 100%)';
+      }, 300);
+    }
+  }, 300);
+
+  // ------------------------
+  // 2️⃣ Проценты — анимация набора с «пружиной»
   const percentEl = card.querySelector('.progress-percent');
+
   percentEl.classList.remove('bump');
-  void percentEl.offsetWidth; // перезапуск анимации
-  percentEl.textContent = percent + '%';
+  void percentEl.offsetWidth;
   percentEl.classList.add('bump');
 
-  // Прогресс-бар (плавно по CSS)
-  card.querySelector('.progress-bar-inner').style.width = percent + '%';
+  let current = parseInt(percentEl.textContent) || 0;
+  const step = current < percent ? 1 : -1;
 
-  // Счётчик (fade)
+  if(this.percentInterval) clearInterval(this.percentInterval);
+  this.percentInterval = setInterval(()=>{
+    current += step;
+    percentEl.textContent = current + '%';
+    if((step>0 && current>=percent) || (step<0 && current<=percent)){
+      percentEl.textContent = percent + '%';
+      clearInterval(this.percentInterval);
+    }
+  }, 12);
+
+  // ------------------------
+  // 3️⃣ Счётчик X из Y с плавным fade
   const counter = card.querySelector('.supp-counter');
   counter.classList.add('fade');
   counter.textContent = `${taken} из ${total} приняты`;
-  setTimeout(() => counter.classList.remove('fade'), 200);
+  setTimeout(()=>counter.classList.remove('fade'),200);
 }
 
 renderSchedule(){
@@ -822,18 +908,26 @@ document.querySelectorAll('[data-skip]').forEach(btn=>{
 document.querySelectorAll('[data-supp]').forEach(btn=>{
   btn.onclick = ()=>{
     const k = btn.dataset.supp;
+    // Переключаем состояние добавки
     this.state.supplements[k] = !this.state.supplements[k];
+
+    // Если есть запись о напоминании — отмечаем как взятую
+    if(this.state.suppNotifications[k]){
+      this.state.suppNotifications[k].taken = this.state.supplements[k];
+    }
+
     this.save();
     haptic.success();
-    
-    // Обновляем только чекбокс
+
+    // Обновляем визуально чекбокс
     btn.textContent = this.state.supplements[k] ? '✓' : '';
     btn.classList.toggle('checked', this.state.supplements[k]);
-    
-    // Обновляем только прогресс-бар спортпита
+
+    // Обновляем прогресс-бар спортпита
     this.updateSuppProgress();
   };
 });
+
 
   // Category buttons - полный рендер (нужно!)
 document.querySelectorAll('[data-category]').forEach(btn=>{
@@ -1001,7 +1095,29 @@ renderActivityRings(){
     </div>
   `;
 }
- 
+renderSuppAnalytics(){
+  const total = Object.keys(this.state.supplements).length;
+  const taken = Object.values(this.state.supplements).filter(v => v).length;
+  const missed = total - taken;
+
+  return `
+    <div class="card p-6 mb-4">
+      <h2 class="text-xl font-bold mb-4">💊 Спортпит</h2>
+      <div class="flex justify-between items-center mb-2">
+        <span>Принято</span>
+        <span class="font-bold text-green-600">${taken}</span>
+      </div>
+      <div class="flex justify-between items-center mb-2">
+        <span>Пропущено</span>
+        <span class="font-bold text-red-500">${missed}</span>
+      </div>
+      <div class="w-full h-2 bg-gray-100 rounded-full overflow-hidden mt-2">
+        <div class="h-full rounded-full" style="width:${(taken/total)*100}%; background:#34C759;"></div>
+      </div>
+    </div>
+  `;
+}
+
 scrollToCurrent(){
   if(this.state.currentTab !== 'schedule') return;
   
@@ -1020,100 +1136,115 @@ scrollToCurrent(){
   }, 100);
 }
 
-renderAnalytics(){
-  const stats = this.getWeeklyStats();
-  
-  // Тренд по дням
-  const dailyGym = [];
-  for(let i = 0; i < 7; i++){
-    const dayDate = this.getDateKey(i);
-    const slots = this.getSlots(i);
-    const gymSlot = slots.find(s => s.id === 'gym');
-    
-    let status = 0; // 0 - не было, 1 - пропущено, 2 - выполнено
-    if(this.state.schedule[i].gym && gymSlot){
-      const key = `${dayDate}-${gymSlot.id}-${slots.indexOf(gymSlot)}`;
-      if(this.isPast(gymSlot, i)){
-        status = this.state.skipped[key] ? 1 : 2;
+renderAnalytics() {
+  // 1️⃣ Подсчёт статистики
+  const stats = {
+    supplements: {taken: 0, missed: 0, days: {}},
+    gym: {done: 0, missed: 0, days: {}},
+    course: {done: 0, missed: 0, days: {}}
+  };
+
+  for (let day = 0; day < 7; day++) {
+    const dayDate = this.getDateKey(day);
+    const dayName = this.days[day];
+
+    stats.supplements.days[dayName] = [];
+    stats.gym.days[dayName] = [];
+    stats.course.days[dayName] = [];
+
+    const slots = this.getSlots(day);
+
+    slots.forEach((slot, i) => {
+      // Спортпит
+      if (slot.supps && this.isPast(slot, day)) {
+        slot.supps.forEach((s, si) => {
+          const key = `${dayDate}-${slot.id}-${i}-s${si}`;
+          if (this.state.supplements[key]) {
+            stats.supplements.taken++;
+            stats.supplements.days[dayName].push({supp: s, status: 'taken'});
+          } else {
+            stats.supplements.missed++;
+            stats.supplements.days[dayName].push({supp: s, status: 'missed'});
+          }
+        });
       }
-    }
-    
-    dailyGym.push({day: this.days[i], status});
+
+      // Тренировка
+      if (slot.id === 'gym' && this.isPast(slot, day)) {
+        const key = `${dayDate}-${slot.id}-${i}`;
+        if (!this.state.skipped[key]) {
+          stats.gym.done++;
+          stats.gym.days[dayName].push('done');
+        } else {
+          stats.gym.missed++;
+          stats.gym.days[dayName].push('missed');
+        }
+      }
+
+      // Курс
+      if (slot.id === 'course' && this.isPast(slot, day)) {
+        const key = `${dayDate}-${slot.id}-${i}`;
+        if (!this.state.skipped[key]) {
+          stats.course.done++;
+          stats.course.days[dayName].push('done');
+        } else {
+          stats.course.missed++;
+          stats.course.days[dayName].push('missed');
+        }
+      }
+    });
   }
-  
-  const maxHeight = 80;
-  
-  return `
-    <div class="card p-6 mb-4">
-      <h2 class="text-xl font-bold mb-4" style="color:#1C1C1E;">📊 Тренды</h2>
-      
-      <div class="mb-6">
-        <p class="text-sm text-gray-600 mb-3">Посещаемость зала</p>
-        <div class="flex items-end justify-between gap-2" style="height:100px;">
-          ${dailyGym.map(d => {
-            const height = d.status === 2 ? maxHeight : (d.status === 1 ? maxHeight * 0.3 : 10);
-            const color = d.status === 2 ? '#34C759' : (d.status === 1 ? '#FF3B30' : '#E5E5EA');
-            return `
-              <div class="flex-1 flex flex-col items-center gap-1">
-                <div class="chart-bar w-full rounded-t-lg transition-all" 
-                     style="height:${height}px; background:${color};"></div>
-                <span class="text-xs text-gray-500">${d.day}</span>
-              </div>
-            `;
-          }).join('')}
+
+  // 2️⃣ Функция для рендеринга дней с индикаторами
+  const renderDays = (category) => {
+    return this.days.map(d => {
+      let content = '';
+      if (category === 'supplements') {
+        stats.supplements.days[d].forEach(s => {
+          content += `<span style="color:${s.status==='taken'?'#34C759':'#FF3B30'}; margin-right:4px;">${s.supp}</span>`;
+        });
+      } else if (category === 'gym') {
+        stats.gym.days[d].forEach(s => {
+          content += `<span style="color:${s==='done'?'#34C759':'#FF3B30'}; margin-right:4px;">${s==='done'?'✔':'✖'}</span>`;
+        });
+      } else if (category === 'course') {
+        stats.course.days[d].forEach(s => {
+          content += `<span style="color:${s==='done'?'#007AFF':'#FF3B30'}; margin-right:4px;">${s==='done'?'✔':'✖'}</span>`;
+        });
+      }
+      return `<div class="flex justify-between mb-1"><span>${d}</span><span>${content}</span></div>`;
+    }).join('');
+  };
+
+  // 3️⃣ Генерация HTML карточек с прогресс-барами
+  const cardTemplate = (title, done, missed, color, category) => {
+    const total = done + missed;
+    const percent = total ? Math.round((done / total) * 100) : 0;
+    return `
+      <div class="card stats-card p-4">
+        <h2 class="font-bold text-lg mb-2">${title}</h2>
+        <div class="flex justify-between mb-2">
+          <span>Выполнено: ${done}</span>
+          <span>Пропущено: ${missed}</span>
+        </div>
+        <div class="progress-bar-bg mb-2">
+          <div class="progress-bar-fill" style="width: ${percent}%; background: ${color};"></div>
+        </div>
+        <div class="text-sm">
+          ${renderDays(category)}
         </div>
       </div>
-      
-      <div class="flex gap-2 text-xs">
-        <div class="flex items-center gap-1">
-          <div class="w-3 h-3 rounded" style="background:#34C759;"></div>
-          <span>Выполнено</span>
-        </div>
-        <div class="flex items-center gap-1">
-          <div class="w-3 h-3 rounded" style="background:#FF3B30;"></div>
-          <span>Пропущено</span>
-        </div>
-        <div class="flex items-center gap-1">
-          <div class="w-3 h-3 rounded" style="background:#E5E5EA;"></div>
-          <span>Не было</span>
-        </div>
-      </div>
-    </div>
-    
-    <div class="card p-6 mb-4">
-      <h2 class="text-xl font-bold mb-4" style="color:#1C1C1E;">💡 Insights</h2>
-      
-      <div class="space-y-3">
-        ${stats.gym.completed > 0 ? `
-          <div class="p-4 rounded-xl" style="background:#F0FDF4;">
-            <p class="text-sm">
-              <span class="font-bold trend-up">Отлично!</span> 
-              Ты сходил в зал <span class="font-bold">${stats.gym.completed}</span> раз на этой неделе
-            </p>
-          </div>
-        ` : ''}
-        
-        ${stats.supplements.completed > stats.supplements.total * 0.8 ? `
-          <div class="p-4 rounded-xl" style="background:#F0F9FF;">
-            <p class="text-sm">
-              <span class="font-bold" style="color:#007AFF;">Молодец!</span> 
-              Регулярный прием спортпита помогает прогрессу
-            </p>
-          </div>
-        ` : ''}
-        
-        ${stats.work.completed === stats.work.total && stats.work.total > 0 ? `
-          <div class="p-4 rounded-xl" style="background:#FFF7ED;">
-            <p class="text-sm">
-              <span class="font-bold" style="color:#FF9500;">💪 Продуктивность 100%!</span> 
-              Ты не пропустил ни одного рабочего дня
-            </p>
-          </div>
-        ` : ''}
-      </div>
-    </div>
     `;
-} // ← закрывает renderAnalytics()
+  };
+
+  return `
+    <div class="space-y-4 px-4 pb-4">
+      ${cardTemplate('💊 Спортпит', stats.supplements.taken, stats.supplements.missed, '#34C759', 'supplements')}
+      ${cardTemplate('🏋️ Тренировки', stats.gym.done, stats.gym.missed, '#FF3B30', 'gym')}
+      ${cardTemplate('📚 Курс', stats.course.done, stats.course.missed, '#007AFF', 'course')}
+    </div>
+  `;
+}
 
 } // ← закрывает class Planner
 
